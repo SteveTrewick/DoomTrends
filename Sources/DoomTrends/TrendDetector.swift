@@ -324,7 +324,7 @@ public actor TrendDetector {
     private func extractTerms(from item: NewsItem) -> [String] {
         let title = item.title
         let summary = item.body?.prefix(configuration.summaryMaxLength) ?? ""
-        let text = title + " " + summary
+        let text = stripURLSubstrings(from: title + " " + summary)
         let tokens = normalizedTokens(from: text)
 
         var terms: [String] = []
@@ -474,6 +474,49 @@ public actor TrendDetector {
         }
         return lowered
     }
+
+    private func stripURLSubstrings(from text: String) -> String {
+        let segments = text.split(whereSeparator: { $0.isWhitespace })
+        guard segments.count > 0 else { return text }
+        var cleaned: [String] = []
+        cleaned.reserveCapacity(segments.count)
+
+        for segment in segments {
+            let token = String(segment)
+            if isURLLikeSegment(token) {
+                continue
+            }
+            cleaned.append(token)
+        }
+
+        return cleaned.joined(separator: " ")
+    }
+
+    private func isURLLikeSegment(_ segment: String) -> Bool {
+        let lower = segment.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") || lower.hasPrefix("www.") {
+            return true
+        }
+
+        let trimmed = segment.trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.symbols))
+        if trimmed.contains("@") || trimmed.contains("/") {
+            return true
+        }
+
+        let parts = trimmed.split(separator: ".")
+        guard parts.count >= 2 else { return false }
+        guard let tld = parts.last?.lowercased() else { return false }
+        if Self.commonTLDs.contains(tld) {
+            return true
+        }
+
+        return false
+    }
+
+    private static let commonTLDs: Set<String> = [
+        "com", "net", "org", "io", "co", "gov", "edu", "uk", "us", "de", "jp", "fr",
+        "it", "ru", "cn", "info", "biz", "me", "tv", "ai"
+    ]
 
     private func addSample(term: String, headline: String, sourceID: String, publishedAt: Date) {
         guard configuration.sampleHeadlineLimit > 0 else { return }

@@ -8,6 +8,7 @@ cross-source presence.
 
 - Rolling, time-bucketed counts for short and baseline windows
 - Token + phrase extraction (bigrams, trigrams, Title-Case capture)
+- URL fragments are stripped before tokenization
 - Explainable output (counts, acceleration, sample headlines)
 - Alias mapping support (loaded by your orchestration layer)
 

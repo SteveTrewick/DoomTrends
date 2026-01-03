@@ -108,4 +108,35 @@ final class TrendDetectorTests: XCTestCase {
 
         XCTAssertTrue(topics.contains { $0.term == "federal reserve" })
     }
+
+    func testURLsAreIgnoredDuringExtraction() async {
+        let config = TrendDetector.Configuration(
+            shortWindow: 300,
+            baselineWindow: 900,
+            bucketSize: 60,
+            enableBigrams: false,
+            enableTrigrams: false,
+            enableTitleCasePhrases: false,
+            sampleHeadlineLimit: 1,
+            minShortCount: 1,
+            minUniqueSources: 1
+        )
+        let detector = TrendDetector(configuration: config)
+        let now = Date()
+
+        let item = NewsItem(
+            feedID: "feed-a",
+            source: "SourceA",
+            title: "https://example.com/foo?bar=baz",
+            body: "www.example.org",
+            url: URL(string: "https://example.com/foo")!,
+            publishedAt: now,
+            ingestedAt: now
+        )
+
+        await detector.ingest(item)
+        let topics = await detector.trending(now: now)
+
+        XCTAssertTrue(topics.isEmpty)
+    }
 }
