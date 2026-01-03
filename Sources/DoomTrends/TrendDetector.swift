@@ -289,6 +289,18 @@ public actor TrendDetector {
         }
     }
 
+    public func addStopwords(_ stopwords: [String]) {
+        for word in stopwords {
+            configuration.stopwords.insert(word.lowercased())
+        }
+    }
+
+    public func removeStopwords(_ stopwords: [String]) {
+        for word in stopwords {
+            configuration.stopwords.remove(word.lowercased())
+        }
+    }
+
     private func ingestSingle(_ item: NewsItem) {
         let timestamp = item.publishedAt
         let bucketKey = bucketKey(for: timestamp)

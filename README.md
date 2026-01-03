@@ -67,6 +67,15 @@ await detector.addAliasMappings([
 ])
 ```
 
+## Stopword Updates
+
+Stopwords can be updated at runtime. Inputs are lowercased internally.
+
+```swift
+await detector.addStopwords(["whatsup", "breaking"])
+await detector.removeStopwords(["breaking"])
+```
+
 ## Configuration
 
 ```swift
