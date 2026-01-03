@@ -380,6 +380,10 @@ public actor TrendDetector {
         for scalar in text.unicodeScalars {
             if CharacterSet.alphanumerics.contains(scalar) {
                 current.unicodeScalars.append(scalar)
+            } else if isApostropheScalar(scalar) {
+                if !current.isEmpty {
+                    current.unicodeScalars.append(scalar)
+                }
             } else {
                 if !current.isEmpty {
                     buffer.append(current)
@@ -394,14 +398,19 @@ public actor TrendDetector {
         var tokens: [String] = []
         tokens.reserveCapacity(buffer.count)
         for raw in buffer {
-            let token = raw.lowercased()
-            if token.count < configuration.minTokenLength { continue }
-            if configuration.stopwords.contains(token) { continue }
-            if configuration.bannedTerms.contains(token) { continue }
-            if !configuration.allowNumericTokens && token.unicodeScalars.allSatisfy({ CharacterSet.decimalDigits.contains($0) }) {
+            let stripped = stripApostrophes(from: raw)
+            if stripped.isEmpty { continue }
+            let normalized = stripped.lowercased()
+            let isShort = stripped.count < configuration.minTokenLength
+            let allowShort = isShort && (isAllCapsToken(stripped) || isShortProperNoun(stripped))
+
+            if !allowShort && isShort { continue }
+            if configuration.bannedTerms.contains(normalized) { continue }
+            if !allowShort && configuration.stopwords.contains(normalized) { continue }
+            if !configuration.allowNumericTokens && normalized.unicodeScalars.allSatisfy({ CharacterSet.decimalDigits.contains($0) }) {
                 continue
             }
-            tokens.append(token)
+            tokens.append(normalized)
         }
         return tokens
     }
@@ -475,6 +484,46 @@ public actor TrendDetector {
         return lowered
     }
 
+    private func stripApostrophes(from value: String) -> String {
+        var result = String.UnicodeScalarView()
+        result.reserveCapacity(value.unicodeScalars.count)
+        for scalar in value.unicodeScalars where !isApostropheScalar(scalar) {
+            result.append(scalar)
+        }
+        return String(result)
+    }
+
+    private func isAllCapsToken(_ token: String) -> Bool {
+        var letterCount = 0
+        for scalar in token.unicodeScalars {
+            if CharacterSet.letters.contains(scalar) {
+                letterCount += 1
+                if !CharacterSet.uppercaseLetters.contains(scalar) {
+                    return false
+                }
+            }
+        }
+        return letterCount >= 2
+    }
+
+    private func isShortProperNoun(_ token: String) -> Bool {
+        guard token.count >= 2, token.count < configuration.minTokenLength else { return false }
+        guard let first = token.unicodeScalars.first, CharacterSet.uppercaseLetters.contains(first) else {
+            return false
+        }
+        var hasLowercase = false
+        var hasUppercaseAfterFirst = false
+        for scalar in token.unicodeScalars.dropFirst() {
+            if CharacterSet.uppercaseLetters.contains(scalar) {
+                hasUppercaseAfterFirst = true
+            }
+            if CharacterSet.lowercaseLetters.contains(scalar) {
+                hasLowercase = true
+            }
+        }
+        return hasLowercase && !hasUppercaseAfterFirst
+    }
+
     private func stripURLSubstrings(from text: String) -> String {
         let segments = text.split(whereSeparator: { $0.isWhitespace })
         guard segments.count > 0 else { return text }
@@ -517,6 +566,15 @@ public actor TrendDetector {
         "com", "net", "org", "io", "co", "gov", "edu", "uk", "us", "de", "jp", "fr",
         "it", "ru", "cn", "info", "biz", "me", "tv", "ai"
     ]
+
+    private func isApostropheScalar(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x27, 0x2018, 0x2019:
+            return true
+        default:
+            return false
+        }
+    }
 
     private func addSample(term: String, headline: String, sourceID: String, publishedAt: Date) {
         guard configuration.sampleHeadlineLimit > 0 else { return }

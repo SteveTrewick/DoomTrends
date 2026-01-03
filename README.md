@@ -9,6 +9,7 @@ cross-source presence.
 - Rolling, time-bucketed counts for short and baseline windows
 - Token + phrase extraction (bigrams, trigrams, Title-Case capture)
 - URL fragments are stripped before tokenization
+- Short proper nouns and all-caps acronyms are preserved (e.g. "Wu", "US")
 - Explainable output (counts, acceleration, sample headlines)
 - Alias mapping support (loaded by your orchestration layer)
 
@@ -32,6 +33,19 @@ await detector.ingest(NewsItem(
 
 let topics = await detector.trending()
 ```
+
+## Output Fields
+
+Each `TrendingTopic` contains:
+
+- `term`: canonicalized term or phrase
+- `score`: composite score for ranking (burst + acceleration + sources)
+- `shortCount`: count within the short window
+- `baselineCount`: count within the baseline window
+- `uniqueSources`: distinct sources in the short window
+- `acceleration`: `shortCount - prevShortCount`
+- `sampleHeadlines`: representative headlines for explainability
+- `lastSeenAt`: most recent timestamp for the term
 
 ## Alias Mapping
 
