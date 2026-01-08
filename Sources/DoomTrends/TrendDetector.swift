@@ -55,6 +55,7 @@ public actor TrendDetector {
         public var bannedTerms: Set<String>
         public var aliasMap: [String: String]
         public var filterStopwordsInPhrases: Bool
+        public var phraseStopwords: Set<String>
 
         public var weights: Weights
         public struct Weights: Sendable, Codable, Hashable {
@@ -93,6 +94,7 @@ public actor TrendDetector {
             bannedTerms: Set<String> = [],
             aliasMap: [String: String] = [:],
             filterStopwordsInPhrases: Bool = false,
+            phraseStopwords: Set<String> = Configuration.defaultPhraseStopwords,
             weights: Weights = Weights(),
             topicLimit: Int = 30,
             sampleHeadlineLimit: Int = 5,
@@ -113,6 +115,7 @@ public actor TrendDetector {
             self.bannedTerms = bannedTerms
             self.aliasMap = aliasMap
             self.filterStopwordsInPhrases = filterStopwordsInPhrases
+            self.phraseStopwords = phraseStopwords
             self.weights = weights
             self.topicLimit = topicLimit
             self.sampleHeadlineLimit = sampleHeadlineLimit
@@ -129,7 +132,18 @@ public actor TrendDetector {
             "says", "said", "she", "so", "than", "that", "the", "their", "them",
             "then", "there", "these", "they", "this", "those", "to", "under", "up",
             "update", "us", "was", "watch", "we", "were", "what", "when", "where",
-            "which", "who", "why", "with", "you", "your"
+            "which", "who", "why", "with", "you", "your",
+            "near", "people"
+        ]
+
+        public static let defaultPhraseStopwords: Set<String> = [
+            "guard", "guards", "guarded", "guarding",
+            "says", "said", "say", "saying",
+            "warn", "warns", "warned", "warning",
+            "calls", "called", "calling",
+            "backs", "backed", "backing",
+            "reports", "reported", "reporting",
+            "sees", "saw", "seeing"
         ]
     }
 
@@ -301,6 +315,18 @@ public actor TrendDetector {
         }
     }
 
+    public func addPhraseStopwords(_ stopwords: [String]) {
+        for word in stopwords {
+            configuration.phraseStopwords.insert(word.lowercased())
+        }
+    }
+
+    public func removePhraseStopwords(_ stopwords: [String]) {
+        for word in stopwords {
+            configuration.phraseStopwords.remove(word.lowercased())
+        }
+    }
+
     private func ingestSingle(_ item: NewsItem) {
         let timestamp = item.publishedAt
         let bucketKey = bucketKey(for: timestamp)
@@ -356,8 +382,8 @@ public actor TrendDetector {
         if configuration.enableBigrams && tokens.count >= 2 {
             for index in 0..<(tokens.count - 1) {
                 let phrase = tokens[index] + " " + tokens[index + 1]
-                if configuration.filterStopwordsInPhrases {
-                    if shouldFilterPhrase(phrase) { continue }
+                if shouldFilterPhrase(phrase, includeStopwords: configuration.filterStopwordsInPhrases) {
+                    continue
                 }
                 addTerm(canonicalize(term: phrase))
             }
@@ -366,8 +392,8 @@ public actor TrendDetector {
         if configuration.enableTrigrams && tokens.count >= 3 {
             for index in 0..<(tokens.count - 2) {
                 let phrase = tokens[index] + " " + tokens[index + 1] + " " + tokens[index + 2]
-                if configuration.filterStopwordsInPhrases {
-                    if shouldFilterPhrase(phrase) { continue }
+                if shouldFilterPhrase(phrase, includeStopwords: configuration.filterStopwordsInPhrases) {
+                    continue
                 }
                 addTerm(canonicalize(term: phrase))
             }
@@ -445,7 +471,7 @@ public actor TrendDetector {
                 for length in 2...maxLen {
                     if start + length > current.count { break }
                     let phrase = current[start..<(start + length)].joined(separator: " ").lowercased()
-                    if shouldFilterPhrase(phrase) { continue }
+                    if shouldFilterPhrase(phrase, includeStopwords: configuration.filterStopwordsInPhrases) { continue }
                     phrases.append(phrase)
                 }
             }
@@ -478,12 +504,13 @@ public actor TrendDetector {
         return trimmed
     }
 
-    private func shouldFilterPhrase(_ phrase: String) -> Bool {
+    private func shouldFilterPhrase(_ phrase: String, includeStopwords: Bool) -> Bool {
         let parts = phrase.split(separator: " ")
         for part in parts {
             let token = part.lowercased()
-            if configuration.stopwords.contains(token) { return true }
+            if includeStopwords && configuration.stopwords.contains(token) { return true }
             if configuration.bannedTerms.contains(token) { return true }
+            if configuration.phraseStopwords.contains(token) { return true }
         }
         return false
     }

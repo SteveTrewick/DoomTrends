@@ -245,4 +245,37 @@ final class TrendDetectorTests: XCTestCase {
         topics = await detector.trending(now: now)
         XCTAssertTrue(topics.contains { $0.term == "customterm" })
     }
+
+    func testPhraseStopwordsFilterBigrams() async {
+        let config = TrendDetector.Configuration(
+            shortWindow: 300,
+            baselineWindow: 900,
+            bucketSize: 60,
+            enableBigrams: true,
+            enableTrigrams: false,
+            enableTitleCasePhrases: false,
+            phraseStopwords: ["guard"],
+            sampleHeadlineLimit: 1,
+            minShortCount: 1,
+            minUniqueSources: 1
+        )
+        let detector = TrendDetector(configuration: config)
+        let now = Date()
+
+        let item = NewsItem(
+            feedID: "feed-a",
+            source: "SourceA",
+            title: "guard oil tanker",
+            body: nil,
+            url: URL(string: "https://example.com/guard")!,
+            publishedAt: now,
+            ingestedAt: now
+        )
+
+        await detector.ingest(item)
+        let topics = await detector.trending(now: now)
+
+        XCTAssertFalse(topics.contains { $0.term == "guard oil" })
+        XCTAssertTrue(topics.contains { $0.term == "oil tanker" })
+    }
 }

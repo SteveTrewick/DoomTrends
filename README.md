@@ -76,6 +76,15 @@ await detector.addStopwords(["whatsup", "breaking"])
 await detector.removeStopwords(["breaking"])
 ```
 
+## Phrase Stopwords
+
+Phrase stopwords filter bigrams/trigrams without removing the underlying unigrams.
+
+```swift
+await detector.addPhraseStopwords(["guard", "warns"])
+await detector.removePhraseStopwords(["guard"])
+```
+
 ## Configuration
 
 ```swift
