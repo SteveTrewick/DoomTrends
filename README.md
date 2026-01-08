@@ -9,7 +9,8 @@ cross-source presence.
 - Rolling, time-bucketed counts for short and baseline windows
 - Token + phrase extraction (bigrams, trigrams, Title-Case capture)
 - URL fragments are stripped before tokenization
-- Short proper nouns and all-caps acronyms are preserved (e.g. "Wu", "US")
+- Short proper nouns and all-caps acronyms are preserved (e.g. "Wu", "US") and
+  all-caps acronyms stay uppercase in output.
 - Explainable output (counts, acceleration, sample headlines)
 - Duplicate story suppression and per-source caps
 - Alias mapping support (loaded by your orchestration layer)

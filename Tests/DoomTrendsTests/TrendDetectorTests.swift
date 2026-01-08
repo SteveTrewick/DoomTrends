@@ -202,8 +202,42 @@ final class TrendDetectorTests: XCTestCase {
         await detector.ingest(item)
         let topics = await detector.trending(now: now)
 
-        XCTAssertTrue(topics.contains { $0.term == "us" })
+        XCTAssertTrue(topics.contains { $0.term == "US" })
         XCTAssertTrue(topics.contains { $0.term == "wu" })
+    }
+
+    func testStopwordsDroppedUnlessAllCaps() async {
+        let config = TrendDetector.Configuration(
+            shortWindow: 300,
+            baselineWindow: 900,
+            bucketSize: 60,
+            enableBigrams: false,
+            enableTrigrams: false,
+            enableTitleCasePhrases: false,
+            stopwords: ["to"],
+            sampleHeadlineLimit: 1,
+            minShortCount: 1,
+            minUniqueSources: 1
+        )
+        let detector = TrendDetector(configuration: config)
+        let now = Date()
+
+        let item = NewsItem(
+            feedID: "feed-a",
+            source: "SourceA",
+            title: "To Alpha US",
+            body: nil,
+            url: URL(string: "https://example.com/to-alpha")!,
+            publishedAt: now,
+            ingestedAt: now
+        )
+
+        await detector.ingest(item)
+        let topics = await detector.trending(now: now)
+
+        XCTAssertFalse(topics.contains { $0.term == "to" })
+        XCTAssertTrue(topics.contains { $0.term == "alpha" })
+        XCTAssertTrue(topics.contains { $0.term == "US" })
     }
 
     func testStopwordUpdates() async {

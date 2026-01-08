@@ -147,7 +147,8 @@ public actor TrendDetector {
             "today", "tonight", "yesterday", "tomorrow",
             "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
             "january", "february", "march", "april", "may", "june", "july", "august",
-            "september", "october", "november", "december"
+            "september", "october", "november", "december",
+            "file", "files", "video", "videos"
         ]
 
         public static let defaultPhraseStopwords: Set<String> = [
@@ -478,17 +479,22 @@ public actor TrendDetector {
         for raw in buffer {
             let stripped = stripApostrophes(from: raw)
             if stripped.isEmpty { continue }
-            let normalized = stripped.lowercased()
-            let isShort = stripped.count < configuration.minTokenLength
-            let allowShort = isShort && (isAllCapsToken(stripped) || isShortProperNoun(stripped))
 
-            if !allowShort && isShort { continue }
+            let isAllCaps = isAllCapsToken(stripped)
+            let isShort = stripped.count < configuration.minTokenLength
+            let allowShort = isShort && (isAllCaps || isShortProperNoun(stripped))
+
+            if isShort && !allowShort { continue }
+
+            let normalized = stripped.lowercased()
             if configuration.bannedTerms.contains(normalized) { continue }
-            if !allowShort && configuration.stopwords.contains(normalized) { continue }
+            if configuration.stopwords.contains(normalized) && !isAllCaps { continue }
             if !configuration.allowNumericTokens && normalized.unicodeScalars.allSatisfy({ CharacterSet.decimalDigits.contains($0) }) {
                 continue
             }
-            tokens.append(normalized)
+
+            let token = isAllCaps ? stripped.uppercased() : normalized
+            tokens.append(token)
         }
         return tokens
     }
@@ -559,6 +565,9 @@ public actor TrendDetector {
         let lowered = term.lowercased()
         if let mapped = configuration.aliasMap[lowered] {
             return mapped
+        }
+        if isAllCapsToken(term) {
+            return term.uppercased()
         }
         return lowered
     }
