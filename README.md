@@ -11,6 +11,7 @@ cross-source presence.
 - URL fragments are stripped before tokenization
 - Short proper nouns and all-caps acronyms are preserved (e.g. "Wu", "US")
 - Explainable output (counts, acceleration, sample headlines)
+- Duplicate story suppression and per-source caps
 - Alias mapping support (loaded by your orchestration layer)
 
 ## Usage
@@ -96,10 +97,17 @@ let config = TrendDetector.Configuration(
     enableTrigrams: false,
     enableTitleCasePhrases: true,
     minShortCount: 2,
-    minUniqueSources: 1
+    minUniqueSources: 2,
+    enableDedupe: true,
+    maxItemsPerSourcePerBucket: 5
 )
 let detector = TrendDetector(configuration: config)
 ```
+
+## Noise Controls
+
+- `enableDedupe` skips items with the same URL or normalized title within the baseline window.
+- `maxItemsPerSourcePerBucket` caps how many items per source can contribute within a bucket.
 
 ## Build
 

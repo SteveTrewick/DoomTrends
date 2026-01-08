@@ -56,6 +56,8 @@ public actor TrendDetector {
         public var aliasMap: [String: String]
         public var filterStopwordsInPhrases: Bool
         public var phraseStopwords: Set<String>
+        public var enableDedupe: Bool
+        public var maxItemsPerSourcePerBucket: Int?
 
         public var weights: Weights
         public struct Weights: Sendable, Codable, Hashable {
@@ -99,7 +101,9 @@ public actor TrendDetector {
             topicLimit: Int = 30,
             sampleHeadlineLimit: Int = 5,
             minShortCount: Int = 2,
-            minUniqueSources: Int = 1
+            minUniqueSources: Int = 2,
+            enableDedupe: Bool = true,
+            maxItemsPerSourcePerBucket: Int? = 5
         ) {
             self.shortWindow = shortWindow
             self.baselineWindow = baselineWindow
@@ -121,6 +125,8 @@ public actor TrendDetector {
             self.sampleHeadlineLimit = sampleHeadlineLimit
             self.minShortCount = minShortCount
             self.minUniqueSources = minUniqueSources
+            self.enableDedupe = enableDedupe
+            self.maxItemsPerSourcePerBucket = maxItemsPerSourcePerBucket
         }
 
         public static let defaultStopwords: Set<String> = [
@@ -133,7 +139,15 @@ public actor TrendDetector {
             "then", "there", "these", "they", "this", "those", "to", "under", "up",
             "update", "us", "was", "watch", "we", "were", "what", "when", "where",
             "which", "who", "why", "with", "you", "your",
-            "near", "people"
+            "near", "people",
+            "can", "cant", "could", "couldnt", "may", "might", "must", "should",
+            "shouldnt", "will", "wont", "would", "wouldnt", "dont", "doesnt",
+            "didnt", "isnt", "arent", "wasnt", "werent", "hasnt", "havent", "hadnt",
+            "day", "days", "week", "weeks", "month", "months", "year", "years",
+            "today", "tonight", "yesterday", "tomorrow",
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+            "january", "february", "march", "april", "may", "june", "july", "august",
+            "september", "october", "november", "december"
         ]
 
         public static let defaultPhraseStopwords: Set<String> = [
@@ -150,6 +164,7 @@ public actor TrendDetector {
     private struct Bucket {
         var termCounts: [String: Int] = [:]
         var termSources: [String: Set<String>] = [:]
+        var sourceItemCounts: [String: Int] = [:]
     }
 
     private struct HeadlineSample: Hashable {
@@ -162,6 +177,8 @@ public actor TrendDetector {
     private var buckets: [Int: Bucket] = [:]
     private var termSamples: [String: [HeadlineSample]] = [:]
     private var lastSeenAt: [String: Date] = [:]
+    private var recentURLSeen: [String: Date] = [:]
+    private var recentTitleSeen: [String: Date] = [:]
 
     public init(configuration: Configuration = Configuration()) {
         var normalizedConfig = configuration
@@ -185,12 +202,16 @@ public actor TrendDetector {
         for item in items {
             ingestSingle(item)
         }
-        expireBuckets(olderThan: Date().addingTimeInterval(-configuration.baselineWindow))
+        let cutoff = Date().addingTimeInterval(-configuration.baselineWindow)
+        expireBuckets(olderThan: cutoff)
+        expireDedupe(olderThan: cutoff)
     }
 
     public func trending(now: Date = .init()) -> [TrendingTopic] {
-        expireBuckets(olderThan: now.addingTimeInterval(-configuration.baselineWindow))
-        pruneSamples(olderThan: now.addingTimeInterval(-configuration.baselineWindow))
+        let cutoff = now.addingTimeInterval(-configuration.baselineWindow)
+        expireBuckets(olderThan: cutoff)
+        expireDedupe(olderThan: cutoff)
+        pruneSamples(olderThan: cutoff)
 
         let shortStart = now.addingTimeInterval(-configuration.shortWindow)
         let prevShortStart = now.addingTimeInterval(-configuration.shortWindow * 2)
@@ -286,6 +307,8 @@ public actor TrendDetector {
         buckets.removeAll()
         termSamples.removeAll()
         lastSeenAt.removeAll()
+        recentURLSeen.removeAll()
+        recentTitleSeen.removeAll()
     }
 
     public func updateAliasMap(_ aliasMap: [String: String]) {
@@ -329,8 +352,26 @@ public actor TrendDetector {
 
     private func ingestSingle(_ item: NewsItem) {
         let timestamp = item.publishedAt
+        let cutoff = timestamp.addingTimeInterval(-configuration.baselineWindow)
+        if configuration.enableDedupe {
+            if isDuplicate(item, cutoff: cutoff) {
+                return
+            }
+            recordDedupe(item, timestamp: timestamp)
+        }
+
         let bucketKey = bucketKey(for: timestamp)
         var bucket = buckets[bucketKey, default: Bucket()]
+
+        let sourceID = item.source
+        if let cap = configuration.maxItemsPerSourcePerBucket, cap > 0 {
+            let count = bucket.sourceItemCounts[sourceID, default: 0]
+            if count >= cap {
+                buckets[bucketKey] = bucket
+                return
+            }
+            bucket.sourceItemCounts[sourceID] = count + 1
+        }
 
         let terms = extractTerms(from: item)
         guard !terms.isEmpty else {
@@ -338,7 +379,6 @@ public actor TrendDetector {
             return
         }
 
-        let sourceID = item.source
         for term in terms {
             bucket.termCounts[term, default: 0] += 1
             if bucket.termSources[term] == nil {
@@ -521,6 +561,40 @@ public actor TrendDetector {
             return mapped
         }
         return lowered
+    }
+
+    private func isDuplicate(_ item: NewsItem, cutoff: Date) -> Bool {
+        let urlKey = item.url.absoluteString.lowercased()
+        if let seen = recentURLSeen[urlKey], seen >= cutoff {
+            return true
+        }
+
+        let titleKey = normalizeTitleForDedupe(item.title)
+        if let seen = recentTitleSeen[titleKey], seen >= cutoff {
+            return true
+        }
+
+        return false
+    }
+
+    private func recordDedupe(_ item: NewsItem, timestamp: Date) {
+        let urlKey = item.url.absoluteString.lowercased()
+        recentURLSeen[urlKey] = timestamp
+        let titleKey = normalizeTitleForDedupe(item.title)
+        recentTitleSeen[titleKey] = timestamp
+    }
+
+    private func expireDedupe(olderThan cutoff: Date) {
+        recentURLSeen.keys.filter { (recentURLSeen[$0] ?? cutoff) < cutoff }.forEach {
+            recentURLSeen.removeValue(forKey: $0)
+        }
+        recentTitleSeen.keys.filter { (recentTitleSeen[$0] ?? cutoff) < cutoff }.forEach {
+            recentTitleSeen.removeValue(forKey: $0)
+        }
+    }
+
+    private func normalizeTitleForDedupe(_ title: String) -> String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func stripApostrophes(from value: String) -> String {

@@ -52,6 +52,7 @@ final class TrendDetectorTests: XCTestCase {
             enableBigrams: false,
             enableTrigrams: false,
             enableTitleCasePhrases: false,
+            stopwords: [],
             sampleHeadlineLimit: 1,
             minShortCount: 1,
             minUniqueSources: 1
@@ -117,6 +118,7 @@ final class TrendDetectorTests: XCTestCase {
             enableBigrams: false,
             enableTrigrams: false,
             enableTitleCasePhrases: false,
+            stopwords: [],
             sampleHeadlineLimit: 1,
             minShortCount: 1,
             minUniqueSources: 1
@@ -168,7 +170,7 @@ final class TrendDetectorTests: XCTestCase {
         await detector.ingest(item)
         let topics = await detector.trending(now: now)
 
-        XCTAssertTrue(topics.contains { $0.term == "wont" })
+        XCTAssertTrue(topics.contains { $0.term == "change" })
         XCTAssertFalse(topics.contains { $0.term == "won" })
     }
 
@@ -277,5 +279,81 @@ final class TrendDetectorTests: XCTestCase {
 
         XCTAssertFalse(topics.contains { $0.term == "guard oil" })
         XCTAssertTrue(topics.contains { $0.term == "oil tanker" })
+    }
+
+    func testDedupeSkipsDuplicateItems() async {
+        let config = TrendDetector.Configuration(
+            shortWindow: 300,
+            baselineWindow: 900,
+            bucketSize: 60,
+            enableBigrams: false,
+            enableTrigrams: false,
+            enableTitleCasePhrases: false,
+            sampleHeadlineLimit: 1,
+            minShortCount: 1,
+            minUniqueSources: 1,
+            enableDedupe: true
+        )
+        let detector = TrendDetector(configuration: config)
+        let now = Date()
+
+        let item = NewsItem(
+            feedID: "feed-a",
+            source: "SourceA",
+            title: "Unique topic",
+            body: nil,
+            url: URL(string: "https://example.com/dup")!,
+            publishedAt: now,
+            ingestedAt: now
+        )
+
+        await detector.ingest(item)
+        await detector.ingest(item)
+        let topics = await detector.trending(now: now)
+
+        let uniqueCount = topics.first { $0.term == "unique" }?.shortCount ?? 0
+        XCTAssertEqual(uniqueCount, 1)
+    }
+
+    func testPerSourceCapSkipsExtraItems() async {
+        let config = TrendDetector.Configuration(
+            shortWindow: 300,
+            baselineWindow: 900,
+            bucketSize: 60,
+            enableBigrams: false,
+            enableTrigrams: false,
+            enableTitleCasePhrases: false,
+            sampleHeadlineLimit: 1,
+            minShortCount: 1,
+            minUniqueSources: 1,
+            maxItemsPerSourcePerBucket: 1
+        )
+        let detector = TrendDetector(configuration: config)
+        let now = Date()
+
+        let itemA = NewsItem(
+            feedID: "feed-a",
+            source: "SourceA",
+            title: "Alpha signal",
+            body: nil,
+            url: URL(string: "https://example.com/a")!,
+            publishedAt: now,
+            ingestedAt: now
+        )
+        let itemB = NewsItem(
+            feedID: "feed-a",
+            source: "SourceA",
+            title: "Beta signal",
+            body: nil,
+            url: URL(string: "https://example.com/b")!,
+            publishedAt: now,
+            ingestedAt: now
+        )
+
+        await detector.ingest([itemA, itemB])
+        let topics = await detector.trending(now: now)
+
+        XCTAssertTrue(topics.contains { $0.term == "alpha" })
+        XCTAssertFalse(topics.contains { $0.term == "beta" })
     }
 }
