@@ -66,19 +66,25 @@ public actor TrendDetector {
             public var countLogWeight: Double
             public var titleCaseWeight: Double
             public var allCapsWeight: Double
+            public var titleTokenWeight: Double
+            public var bodyTokenWeight: Double
 
             public init(
                 accelWeight: Double = 0.25,
                 sourceWeight: Double = 0.30,
                 countLogWeight: Double = 1.0,
                 titleCaseWeight: Double = 1.25,
-                allCapsWeight: Double = 1.5
+                allCapsWeight: Double = 1.5,
+                titleTokenWeight: Double = 1.0,
+                bodyTokenWeight: Double = 0.6
             ) {
                 self.accelWeight = accelWeight
                 self.sourceWeight = sourceWeight
                 self.countLogWeight = countLogWeight
                 self.titleCaseWeight = titleCaseWeight
                 self.allCapsWeight = allCapsWeight
+                self.titleTokenWeight = titleTokenWeight
+                self.bodyTokenWeight = bodyTokenWeight
             }
         }
 
@@ -86,6 +92,8 @@ public actor TrendDetector {
         public var sampleHeadlineLimit: Int
         public var minShortCount: Int
         public var minUniqueSources: Int
+        public var lowercaseMinShortCount: Int
+        public var lowercaseMinUniqueSources: Int
 
         public init(
             shortWindow: TimeInterval = 15 * 60,
@@ -108,6 +116,8 @@ public actor TrendDetector {
             sampleHeadlineLimit: Int = 5,
             minShortCount: Int = 2,
             minUniqueSources: Int = 2,
+            lowercaseMinShortCount: Int? = nil,
+            lowercaseMinUniqueSources: Int? = nil,
             enableDedupe: Bool = true,
             maxItemsPerSourcePerBucket: Int? = 5
         ) {
@@ -131,6 +141,8 @@ public actor TrendDetector {
             self.sampleHeadlineLimit = sampleHeadlineLimit
             self.minShortCount = minShortCount
             self.minUniqueSources = minUniqueSources
+            self.lowercaseMinShortCount = lowercaseMinShortCount ?? max(minShortCount, 3)
+            self.lowercaseMinUniqueSources = lowercaseMinUniqueSources ?? minUniqueSources
             self.enableDedupe = enableDedupe
             self.maxItemsPerSourcePerBucket = maxItemsPerSourcePerBucket
         }
@@ -201,6 +213,7 @@ public actor TrendDetector {
 
     private struct Bucket {
         var termCounts: [String: Int] = [:]
+        var termTitleCounts: [String: Int] = [:]
         var termSources: [String: Set<String>] = [:]
         var sourceItemCounts: [String: Int] = [:]
     }
@@ -218,6 +231,7 @@ public actor TrendDetector {
     private struct TermCandidate {
         let term: String
         let caseStyle: CaseStyle
+        let isTitle: Bool
     }
 
     private struct Token {
@@ -279,6 +293,9 @@ public actor TrendDetector {
         var shortCounts: [String: Int] = [:]
         var prevShortCounts: [String: Int] = [:]
         var baselineCounts: [String: Int] = [:]
+        var shortTitleCounts: [String: Int] = [:]
+        var prevShortTitleCounts: [String: Int] = [:]
+        var baselineTitleCounts: [String: Int] = [:]
         var shortSources: [String: Set<String>] = [:]
 
         for (bucketKey, bucket) in buckets {
@@ -290,11 +307,15 @@ public actor TrendDetector {
             let inPrevShort = bucketStart >= prevShortStart && bucketStart < shortStart
 
             for (term, count) in bucket.termCounts {
+                let titleCount = bucket.termTitleCounts[term, default: 0]
                 baselineCounts[term, default: 0] += count
+                baselineTitleCounts[term, default: 0] += titleCount
                 if inShort {
                     shortCounts[term, default: 0] += count
+                    shortTitleCounts[term, default: 0] += titleCount
                 } else if inPrevShort {
                     prevShortCounts[term, default: 0] += count
+                    prevShortTitleCounts[term, default: 0] += titleCount
                 }
             }
 
@@ -313,20 +334,34 @@ public actor TrendDetector {
         topics.reserveCapacity(shortCounts.count)
 
         for (term, shortCount) in shortCounts {
-            if shortCount < configuration.minShortCount {
+            let uniqueSources = shortSources[term]?.count ?? 0
+            let baselineCount = baselineCounts[term, default: 0]
+            let prevShortCount = prevShortCounts[term, default: 0]
+
+            let shortTitleCount = shortTitleCounts[term, default: 0]
+            let prevShortTitleCount = prevShortTitleCounts[term, default: 0]
+            let baselineTitleCount = baselineTitleCounts[term, default: 0]
+
+            let weightedShort = weightedCount(total: shortCount, title: shortTitleCount)
+            let weightedPrevShort = weightedCount(total: prevShortCount, title: prevShortTitleCount)
+            let weightedBaseline = weightedCount(total: baselineCount, title: baselineTitleCount)
+
+            let caseStyle = termCaseStyles[term] ?? .normal
+            let minShort = caseStyle == .normal ? configuration.lowercaseMinShortCount : configuration.minShortCount
+            let minSources = caseStyle == .normal ? configuration.lowercaseMinUniqueSources : configuration.minUniqueSources
+
+            if weightedShort < Double(minShort) {
                 continue
             }
-            let uniqueSources = shortSources[term]?.count ?? 0
-            if uniqueSources < configuration.minUniqueSources {
+            if uniqueSources < minSources {
                 continue
             }
 
-            let baselineCount = baselineCounts[term, default: 0]
-            let prevShortCount = prevShortCounts[term, default: 0]
             let acceleration = shortCount - prevShortCount
-            let burst = Double(shortCount) / Double(max(1, baselineCount))
-            let countFactor = configuration.weights.countLogWeight * log(1 + Double(shortCount))
-            let accelFactor = 1 + configuration.weights.accelWeight * max(0, Double(acceleration))
+            let weightedAcceleration = weightedShort - weightedPrevShort
+            let burst = weightedShort / max(1.0, weightedBaseline)
+            let countFactor = configuration.weights.countLogWeight * log(1 + weightedShort)
+            let accelFactor = 1 + configuration.weights.accelWeight * max(0, weightedAcceleration)
             let sourceFactor = 1 + configuration.weights.sourceWeight * max(0, Double(uniqueSources - 1))
             let caseFactor = caseWeight(for: term)
             let score = countFactor * burst * accelFactor * sourceFactor * caseFactor
@@ -443,6 +478,9 @@ public actor TrendDetector {
         for candidate in terms {
             let term = candidate.term
             bucket.termCounts[term, default: 0] += 1
+            if candidate.isTitle {
+                bucket.termTitleCounts[term, default: 0] += 1
+            }
             if bucket.termSources[term] == nil {
                 bucket.termSources[term] = [sourceID]
             } else {
@@ -463,56 +501,66 @@ public actor TrendDetector {
     }
 
     private func extractTerms(from item: NewsItem) -> [TermCandidate] {
-        let title = item.title
+        let title = stripURLSubstrings(from: item.title)
         let summary = item.body?.prefix(configuration.summaryMaxLength) ?? ""
-        let text = stripURLSubstrings(from: title + " " + summary)
-        let tokens = normalizedTokens(from: text)
+        let body = stripURLSubstrings(from: String(summary))
+
+        let titleTokens = normalizedTokens(from: title)
+        let bodyTokens = normalizedTokens(from: body)
 
         var terms: [TermCandidate] = []
         var seen: [String: Int] = [:]
 
-        func addTerm(_ term: String, caseStyle: CaseStyle) {
+        func addTerm(_ term: String, caseStyle: CaseStyle, isTitle: Bool) {
             guard terms.count < configuration.maxTermsPerItem else { return }
             if let index = seen[term] {
-                if caseStyle > terms[index].caseStyle {
-                    terms[index] = TermCandidate(term: term, caseStyle: caseStyle)
+                let current = terms[index]
+                let mergedCase = max(current.caseStyle, caseStyle)
+                let mergedTitle = current.isTitle || isTitle
+                if mergedCase != current.caseStyle || mergedTitle != current.isTitle {
+                    terms[index] = TermCandidate(term: term, caseStyle: mergedCase, isTitle: mergedTitle)
                 }
                 return
             }
             seen[term] = terms.count
-            terms.append(TermCandidate(term: term, caseStyle: caseStyle))
+            terms.append(TermCandidate(term: term, caseStyle: caseStyle, isTitle: isTitle))
         }
 
-        for token in tokens {
-            addTerm(canonicalize(term: token.value), caseStyle: token.caseStyle)
-        }
+        func addTokens(_ tokens: [Token], isTitle: Bool) {
+            for token in tokens {
+                addTerm(canonicalize(term: token.value), caseStyle: token.caseStyle, isTitle: isTitle)
+            }
 
-        if configuration.enableBigrams && tokens.count >= 2 {
-            for index in 0..<(tokens.count - 1) {
-                let phrase = tokens[index].value + " " + tokens[index + 1].value
-                if shouldFilterPhrase(phrase, includeStopwords: configuration.filterStopwordsInPhrases) {
-                    continue
+            if configuration.enableBigrams && tokens.count >= 2 {
+                for index in 0..<(tokens.count - 1) {
+                    let phrase = tokens[index].value + " " + tokens[index + 1].value
+                    if shouldFilterPhrase(phrase, includeStopwords: configuration.filterStopwordsInPhrases) {
+                        continue
+                    }
+                    let phraseCase = caseStyle(for: [tokens[index], tokens[index + 1]])
+                    addTerm(canonicalize(term: phrase), caseStyle: phraseCase, isTitle: isTitle)
                 }
-                let phraseCase = caseStyle(for: [tokens[index], tokens[index + 1]])
-                addTerm(canonicalize(term: phrase), caseStyle: phraseCase)
+            }
+
+            if configuration.enableTrigrams && tokens.count >= 3 {
+                for index in 0..<(tokens.count - 2) {
+                    let phrase = tokens[index].value + " " + tokens[index + 1].value + " " + tokens[index + 2].value
+                    if shouldFilterPhrase(phrase, includeStopwords: configuration.filterStopwordsInPhrases) {
+                        continue
+                    }
+                    let phraseCase = caseStyle(for: [tokens[index], tokens[index + 1], tokens[index + 2]])
+                    addTerm(canonicalize(term: phrase), caseStyle: phraseCase, isTitle: isTitle)
+                }
             }
         }
 
-        if configuration.enableTrigrams && tokens.count >= 3 {
-            for index in 0..<(tokens.count - 2) {
-                let phrase = tokens[index].value + " " + tokens[index + 1].value + " " + tokens[index + 2].value
-                if shouldFilterPhrase(phrase, includeStopwords: configuration.filterStopwordsInPhrases) {
-                    continue
-                }
-                let phraseCase = caseStyle(for: [tokens[index], tokens[index + 1], tokens[index + 2]])
-                addTerm(canonicalize(term: phrase), caseStyle: phraseCase)
-            }
-        }
+        addTokens(titleTokens, isTitle: true)
+        addTokens(bodyTokens, isTitle: false)
 
         if configuration.enableTitleCasePhrases {
-            let phrases = titleCasePhrases(from: title)
+            let phrases = titleCasePhrases(from: item.title)
             for phrase in phrases {
-                addTerm(canonicalize(term: phrase), caseStyle: .titleCase)
+                addTerm(canonicalize(term: phrase), caseStyle: .titleCase, isTitle: true)
             }
         }
 
@@ -675,6 +723,14 @@ public actor TrendDetector {
         case .normal:
             return 1.0
         }
+    }
+
+    private func weightedCount(total: Int, title: Int) -> Double {
+        let titleWeight = configuration.weights.titleTokenWeight
+        let bodyWeight = configuration.weights.bodyTokenWeight
+        let titleCount = max(0, title)
+        let bodyCount = max(0, total - titleCount)
+        return Double(titleCount) * titleWeight + Double(bodyCount) * bodyWeight
     }
 
     private func isDuplicate(_ item: NewsItem, cutoff: Date) -> Bool {

@@ -14,7 +14,9 @@ final class TrendDetectorTests: XCTestCase {
             enableTitleCasePhrases: false,
             sampleHeadlineLimit: 2,
             minShortCount: 2,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 2,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -55,7 +57,9 @@ final class TrendDetectorTests: XCTestCase {
             stopwords: [],
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         await detector.updateAliasMap([
@@ -89,7 +93,9 @@ final class TrendDetectorTests: XCTestCase {
             enableTitleCasePhrases: true,
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -121,7 +127,9 @@ final class TrendDetectorTests: XCTestCase {
             stopwords: [],
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -152,7 +160,9 @@ final class TrendDetectorTests: XCTestCase {
             enableTitleCasePhrases: false,
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -184,7 +194,9 @@ final class TrendDetectorTests: XCTestCase {
             enableTitleCasePhrases: false,
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -225,7 +237,9 @@ final class TrendDetectorTests: XCTestCase {
             weights: weights,
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -276,7 +290,9 @@ final class TrendDetectorTests: XCTestCase {
             weights: weights,
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -319,7 +335,9 @@ final class TrendDetectorTests: XCTestCase {
             stopwords: ["to"],
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -352,7 +370,9 @@ final class TrendDetectorTests: XCTestCase {
             enableTitleCasePhrases: false,
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -395,7 +415,9 @@ final class TrendDetectorTests: XCTestCase {
             phraseStopwords: ["guard"],
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1
+            minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -428,6 +450,8 @@ final class TrendDetectorTests: XCTestCase {
             sampleHeadlineLimit: 1,
             minShortCount: 1,
             minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1,
             enableDedupe: true
         )
         let detector = TrendDetector(configuration: config)
@@ -462,6 +486,8 @@ final class TrendDetectorTests: XCTestCase {
             sampleHeadlineLimit: 1,
             minShortCount: 1,
             minUniqueSources: 1,
+            lowercaseMinShortCount: 1,
+            lowercaseMinUniqueSources: 1,
             maxItemsPerSourcePerBucket: 1
         )
         let detector = TrendDetector(configuration: config)
