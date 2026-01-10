@@ -206,6 +206,108 @@ final class TrendDetectorTests: XCTestCase {
         XCTAssertTrue(topics.contains { $0.term == "wu" })
     }
 
+    func testTitleCaseWeightBoostsScore() async {
+        let weights = TrendDetector.Configuration.Weights(
+            accelWeight: 0,
+            sourceWeight: 0,
+            countLogWeight: 1.0,
+            titleCaseWeight: 2.0,
+            allCapsWeight: 1.0
+        )
+        let config = TrendDetector.Configuration(
+            shortWindow: 300,
+            baselineWindow: 900,
+            bucketSize: 60,
+            enableBigrams: false,
+            enableTrigrams: false,
+            enableTitleCasePhrases: false,
+            stopwords: [],
+            sampleHeadlineLimit: 1,
+            minShortCount: 1,
+            minUniqueSources: 1,
+            weights: weights
+        )
+        let detector = TrendDetector(configuration: config)
+        let now = Date()
+
+        let trumpItem = NewsItem(
+            feedID: "feed-a",
+            source: "SourceA",
+            title: "Trump visits",
+            body: nil,
+            url: URL(string: "https://example.com/trump")!,
+            publishedAt: now,
+            ingestedAt: now
+        )
+        let policyItem = NewsItem(
+            feedID: "feed-b",
+            source: "SourceB",
+            title: "policy update",
+            body: nil,
+            url: URL(string: "https://example.com/policy")!,
+            publishedAt: now,
+            ingestedAt: now
+        )
+
+        await detector.ingest([trumpItem, policyItem])
+        let topics = await detector.trending(now: now)
+
+        let trumpScore = topics.first { $0.term == "trump" }?.score ?? 0
+        let policyScore = topics.first { $0.term == "policy" }?.score ?? 0
+        XCTAssertGreaterThan(trumpScore, policyScore)
+    }
+
+    func testAllCapsWeightBoostsScore() async {
+        let weights = TrendDetector.Configuration.Weights(
+            accelWeight: 0,
+            sourceWeight: 0,
+            countLogWeight: 1.0,
+            titleCaseWeight: 1.0,
+            allCapsWeight: 2.0
+        )
+        let config = TrendDetector.Configuration(
+            shortWindow: 300,
+            baselineWindow: 900,
+            bucketSize: 60,
+            enableBigrams: false,
+            enableTrigrams: false,
+            enableTitleCasePhrases: false,
+            stopwords: [],
+            sampleHeadlineLimit: 1,
+            minShortCount: 1,
+            minUniqueSources: 1,
+            weights: weights
+        )
+        let detector = TrendDetector(configuration: config)
+        let now = Date()
+
+        let usItem = NewsItem(
+            feedID: "feed-a",
+            source: "SourceA",
+            title: "US meets",
+            body: nil,
+            url: URL(string: "https://example.com/us")!,
+            publishedAt: now,
+            ingestedAt: now
+        )
+        let policyItem = NewsItem(
+            feedID: "feed-b",
+            source: "SourceB",
+            title: "policy update",
+            body: nil,
+            url: URL(string: "https://example.com/policy-2")!,
+            publishedAt: now,
+            ingestedAt: now
+        )
+
+        await detector.ingest([usItem, policyItem])
+        let topics = await detector.trending(now: now)
+
+        let usScore = topics.first { $0.term == "US" }?.score ?? 0
+        let policyScore = topics.first { $0.term == "policy" }?.score ?? 0
+        XCTAssertGreaterThan(usScore, policyScore)
+    }
+
     func testStopwordsDroppedUnlessAllCaps() async {
         let config = TrendDetector.Configuration(
             shortWindow: 300,

@@ -64,15 +64,21 @@ public actor TrendDetector {
             public var accelWeight: Double
             public var sourceWeight: Double
             public var countLogWeight: Double
+            public var titleCaseWeight: Double
+            public var allCapsWeight: Double
 
             public init(
                 accelWeight: Double = 0.25,
                 sourceWeight: Double = 0.30,
-                countLogWeight: Double = 1.0
+                countLogWeight: Double = 1.0,
+                titleCaseWeight: Double = 1.25,
+                allCapsWeight: Double = 1.5
             ) {
                 self.accelWeight = accelWeight
                 self.sourceWeight = sourceWeight
                 self.countLogWeight = countLogWeight
+                self.titleCaseWeight = titleCaseWeight
+                self.allCapsWeight = allCapsWeight
             }
         }
 
@@ -199,6 +205,26 @@ public actor TrendDetector {
         var sourceItemCounts: [String: Int] = [:]
     }
 
+    private enum CaseStyle: Int, Comparable {
+        case normal = 0
+        case titleCase = 1
+        case allCaps = 2
+
+        static func < (lhs: CaseStyle, rhs: CaseStyle) -> Bool {
+            lhs.rawValue < rhs.rawValue
+        }
+    }
+
+    private struct TermCandidate {
+        let term: String
+        let caseStyle: CaseStyle
+    }
+
+    private struct Token {
+        let value: String
+        let caseStyle: CaseStyle
+    }
+
     private struct HeadlineSample: Hashable {
         let headline: String
         let sourceID: String
@@ -209,6 +235,7 @@ public actor TrendDetector {
     private var buckets: [Int: Bucket] = [:]
     private var termSamples: [String: [HeadlineSample]] = [:]
     private var lastSeenAt: [String: Date] = [:]
+    private var termCaseStyles: [String: CaseStyle] = [:]
     private var recentURLSeen: [String: Date] = [:]
     private var recentTitleSeen: [String: Date] = [:]
 
@@ -301,7 +328,8 @@ public actor TrendDetector {
             let countFactor = configuration.weights.countLogWeight * log(1 + Double(shortCount))
             let accelFactor = 1 + configuration.weights.accelWeight * max(0, Double(acceleration))
             let sourceFactor = 1 + configuration.weights.sourceWeight * max(0, Double(uniqueSources - 1))
-            let score = countFactor * burst * accelFactor * sourceFactor
+            let caseFactor = caseWeight(for: term)
+            let score = countFactor * burst * accelFactor * sourceFactor * caseFactor
             let samples = sampleHeadlines(for: term, limit: configuration.sampleHeadlineLimit)
             let lastSeen = lastSeenAt[term] ?? now
 
@@ -339,6 +367,7 @@ public actor TrendDetector {
         buckets.removeAll()
         termSamples.removeAll()
         lastSeenAt.removeAll()
+        termCaseStyles.removeAll()
         recentURLSeen.removeAll()
         recentTitleSeen.removeAll()
     }
@@ -411,7 +440,8 @@ public actor TrendDetector {
             return
         }
 
-        for term in terms {
+        for candidate in terms {
+            let term = candidate.term
             bucket.termCounts[term, default: 0] += 1
             if bucket.termSources[term] == nil {
                 bucket.termSources[term] = [sourceID]
@@ -419,6 +449,7 @@ public actor TrendDetector {
                 bucket.termSources[term]?.insert(sourceID)
             }
             addSample(term: term, headline: item.title, sourceID: sourceID, publishedAt: timestamp)
+            recordCaseStyle(term: term, caseStyle: candidate.caseStyle)
             if let existing = lastSeenAt[term] {
                 if timestamp > existing {
                     lastSeenAt[term] = timestamp
@@ -431,57 +462,64 @@ public actor TrendDetector {
         buckets[bucketKey] = bucket
     }
 
-    private func extractTerms(from item: NewsItem) -> [String] {
+    private func extractTerms(from item: NewsItem) -> [TermCandidate] {
         let title = item.title
         let summary = item.body?.prefix(configuration.summaryMaxLength) ?? ""
         let text = stripURLSubstrings(from: title + " " + summary)
         let tokens = normalizedTokens(from: text)
 
-        var terms: [String] = []
-        var seen: Set<String> = []
+        var terms: [TermCandidate] = []
+        var seen: [String: Int] = [:]
 
-        func addTerm(_ term: String) {
+        func addTerm(_ term: String, caseStyle: CaseStyle) {
             guard terms.count < configuration.maxTermsPerItem else { return }
-            guard !seen.contains(term) else { return }
-            seen.insert(term)
-            terms.append(term)
+            if let index = seen[term] {
+                if caseStyle > terms[index].caseStyle {
+                    terms[index] = TermCandidate(term: term, caseStyle: caseStyle)
+                }
+                return
+            }
+            seen[term] = terms.count
+            terms.append(TermCandidate(term: term, caseStyle: caseStyle))
         }
 
         for token in tokens {
-            addTerm(canonicalize(term: token))
+            addTerm(canonicalize(term: token.value), caseStyle: token.caseStyle)
         }
 
         if configuration.enableBigrams && tokens.count >= 2 {
             for index in 0..<(tokens.count - 1) {
-                let phrase = tokens[index] + " " + tokens[index + 1]
+                let phrase = tokens[index].value + " " + tokens[index + 1].value
                 if shouldFilterPhrase(phrase, includeStopwords: configuration.filterStopwordsInPhrases) {
                     continue
                 }
-                addTerm(canonicalize(term: phrase))
+                let phraseCase = caseStyle(for: [tokens[index], tokens[index + 1]])
+                addTerm(canonicalize(term: phrase), caseStyle: phraseCase)
             }
         }
 
         if configuration.enableTrigrams && tokens.count >= 3 {
             for index in 0..<(tokens.count - 2) {
-                let phrase = tokens[index] + " " + tokens[index + 1] + " " + tokens[index + 2]
+                let phrase = tokens[index].value + " " + tokens[index + 1].value + " " + tokens[index + 2].value
                 if shouldFilterPhrase(phrase, includeStopwords: configuration.filterStopwordsInPhrases) {
                     continue
                 }
-                addTerm(canonicalize(term: phrase))
+                let phraseCase = caseStyle(for: [tokens[index], tokens[index + 1], tokens[index + 2]])
+                addTerm(canonicalize(term: phrase), caseStyle: phraseCase)
             }
         }
 
         if configuration.enableTitleCasePhrases {
             let phrases = titleCasePhrases(from: title)
             for phrase in phrases {
-                addTerm(canonicalize(term: phrase))
+                addTerm(canonicalize(term: phrase), caseStyle: .titleCase)
             }
         }
 
         return terms
     }
 
-    private func normalizedTokens(from text: String) -> [String] {
+    private func normalizedTokens(from text: String) -> [Token] {
         var buffer: [String] = []
         buffer.reserveCapacity(64)
         var current = ""
@@ -505,13 +543,14 @@ public actor TrendDetector {
             buffer.append(current)
         }
 
-        var tokens: [String] = []
+        var tokens: [Token] = []
         tokens.reserveCapacity(buffer.count)
         for raw in buffer {
             let stripped = stripApostrophes(from: raw)
             if stripped.isEmpty { continue }
 
             let isAllCaps = isAllCapsToken(stripped)
+            let isTitleCase = !isAllCaps && isTitleCaseToken(stripped)
             let isShort = stripped.count < configuration.minTokenLength
             let allowShort = isShort && (isAllCaps || isShortProperNoun(stripped))
 
@@ -524,8 +563,9 @@ public actor TrendDetector {
                 continue
             }
 
-            let token = isAllCaps ? stripped.uppercased() : normalized
-            tokens.append(token)
+            let tokenValue = isAllCaps ? stripped.uppercased() : normalized
+            let caseStyle: CaseStyle = isAllCaps ? .allCaps : (isTitleCase ? .titleCase : .normal)
+            tokens.append(Token(value: tokenValue, caseStyle: caseStyle))
         }
         return tokens
     }
@@ -567,6 +607,17 @@ public actor TrendDetector {
         return phrases
     }
 
+    private func caseStyle(for tokens: [Token]) -> CaseStyle {
+        guard !tokens.isEmpty else { return .normal }
+        if tokens.allSatisfy({ $0.caseStyle == .allCaps }) {
+            return .allCaps
+        }
+        if tokens.allSatisfy({ $0.caseStyle == .titleCase || $0.caseStyle == .allCaps }) {
+            return .titleCase
+        }
+        return .normal
+    }
+
     private func isTitleCaseToken(_ token: String) -> Bool {
         guard let firstScalar = token.unicodeScalars.first else { return false }
         if !CharacterSet.uppercaseLetters.contains(firstScalar) {
@@ -601,6 +652,29 @@ public actor TrendDetector {
             return term.uppercased()
         }
         return lowered
+    }
+
+    private func recordCaseStyle(term: String, caseStyle: CaseStyle) {
+        guard caseStyle != .normal else { return }
+        if let existing = termCaseStyles[term] {
+            if caseStyle > existing {
+                termCaseStyles[term] = caseStyle
+            }
+        } else {
+            termCaseStyles[term] = caseStyle
+        }
+    }
+
+    private func caseWeight(for term: String) -> Double {
+        let style = termCaseStyles[term] ?? .normal
+        switch style {
+        case .allCaps:
+            return configuration.weights.allCapsWeight
+        case .titleCase:
+            return configuration.weights.titleCaseWeight
+        case .normal:
+            return 1.0
+        }
     }
 
     private func isDuplicate(_ item: NewsItem, cutoff: Date) -> Bool {
@@ -799,6 +873,7 @@ public actor TrendDetector {
         }
         for (term, lastSeen) in lastSeenAt where lastSeen < cutoff {
             lastSeenAt.removeValue(forKey: term)
+            termCaseStyles.removeValue(forKey: term)
         }
     }
 }

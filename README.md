@@ -11,6 +11,7 @@ cross-source presence.
 - URL fragments are stripped before tokenization
 - Short proper nouns and all-caps acronyms are preserved (e.g. "Wu", "US") and
   all-caps acronyms stay uppercase in output.
+- Title-case and ALL-CAPS terms can be boosted in scoring via weights.
 - Explainable output (counts, acceleration, sample headlines)
 - Duplicate story suppression and per-source caps
 - Alias mapping support (loaded by your orchestration layer)
@@ -100,7 +101,11 @@ let config = TrendDetector.Configuration(
     minShortCount: 2,
     minUniqueSources: 2,
     enableDedupe: true,
-    maxItemsPerSourcePerBucket: 5
+    maxItemsPerSourcePerBucket: 5,
+    weights: .init(
+        titleCaseWeight: 1.25,
+        allCapsWeight: 1.5
+    )
 )
 let detector = TrendDetector(configuration: config)
 ```
