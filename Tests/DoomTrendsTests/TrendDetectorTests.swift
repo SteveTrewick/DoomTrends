@@ -222,10 +222,10 @@ final class TrendDetectorTests: XCTestCase {
             enableTrigrams: false,
             enableTitleCasePhrases: false,
             stopwords: [],
+            weights: weights,
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1,
-            weights: weights
+            minUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
@@ -273,10 +273,10 @@ final class TrendDetectorTests: XCTestCase {
             enableTrigrams: false,
             enableTitleCasePhrases: false,
             stopwords: [],
+            weights: weights,
             sampleHeadlineLimit: 1,
             minShortCount: 1,
-            minUniqueSources: 1,
-            weights: weights
+            minUniqueSources: 1
         )
         let detector = TrendDetector(configuration: config)
         let now = Date()
